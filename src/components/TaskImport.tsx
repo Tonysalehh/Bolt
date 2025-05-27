@@ -6,6 +6,7 @@ import { useAuth } from '../contexts/AuthContext';
 export default function TaskImport() {
   const [importing, setImporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [validationErrors, setValidationErrors] = useState<any[]>([]);
   const { user } = useAuth();
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -14,26 +15,34 @@ export default function TaskImport() {
 
     setImporting(true);
     setError(null);
+    setValidationErrors([]);
 
     try {
       const tasks = await parseExcelFile(file);
       
       // Insert tasks into Supabase
-      for (const task of tasks) {
-        await supabase.from('tasks').insert({
+      const { error: supabaseError } = await supabase.from('tasks').insert(
+        tasks.map(task => ({
           title: task.title,
           description: task.description,
           deadline: new Date(task.deadline).toISOString(),
           priority: task.priority,
           status: 'pending',
           created_by: user?.id
-        });
-      }
+        }))
+      );
+
+      if (supabaseError) throw supabaseError;
 
       event.target.value = '';
-      alert('Tasks imported successfully!');
-    } catch (err) {
-      setError('Error importing tasks. Please check your Excel file format.');
+      alert(`Successfully imported ${tasks.length} tasks!`);
+    } catch (err: any) {
+      if (err.name === 'ValidationError') {
+        setValidationErrors(err.errors);
+        setError('Some tasks failed validation. Please check the errors below.');
+      } else {
+        setError('Error importing tasks. Please check your Excel file format.');
+      }
       console.error(err);
     } finally {
       setImporting(false);
@@ -73,22 +82,42 @@ export default function TaskImport() {
         )}
         
         {error && (
-          <div className="text-red-600">
+          <div className="text-red-600 mb-2">
             {error}
+          </div>
+        )}
+
+        {validationErrors.length > 0 && (
+          <div className="mt-4 p-4 bg-red-50 rounded-md">
+            <h3 className="text-sm font-medium text-red-800 mb-2">Validation Errors:</h3>
+            <ul className="list-disc list-inside text-sm text-red-700">
+              {validationErrors.map((error, index) => (
+                <li key={index}>
+                  Sheet: {error.sheet}, Row: {error.row}
+                  <ul className="ml-4 list-disc list-inside">
+                    {error.errors.map((err: string, i: number) => (
+                      <li key={i}>{err}</li>
+                    ))}
+                  </ul>
+                </li>
+              ))}
+            </ul>
           </div>
         )}
         
         <div className="text-sm text-gray-500">
-          <p>Excel file should have sheets named:</p>
-          <ul className="list-disc list-inside">
-            <li>daily</li>
-            <li>weekly</li>
-            <li>monthly</li>
-            <li>yearly</li>
+          <p className="font-medium mb-2">Excel File Requirements:</p>
+          <ul className="list-disc list-inside space-y-1">
+            <li>Sheets needed: daily, weekly, monthly, yearly</li>
+            <li>Required columns:
+              <ul className="ml-4 list-disc list-inside">
+                <li>title (required)</li>
+                <li>description (optional)</li>
+                <li>deadline (required, date format)</li>
+                <li>priority (optional: low, medium, high, urgent)</li>
+              </ul>
+            </li>
           </ul>
-          <p className="mt-2">
-            Each sheet should have columns: title, description, deadline, priority
-          </p>
         </div>
       </div>
     </div>
